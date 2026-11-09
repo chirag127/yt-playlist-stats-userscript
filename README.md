@@ -1,35 +1,50 @@
 # YT Playlist Stats
 
-Total and average duration, watch time at 1.25x / 1.5x / 2x, a finish-by clock and the channel mix. Deep scan asks the API for the whole playlist.
+How long is this playlist, really? And when would you be done with it?
+
+The **Stats** button on the shared toolbar opens a panel with:
+
+- rows loaded, rows with a readable duration
+- total and average duration
+- watch time at **1.25×**, **1.5×** and **2×**
+- a **finish-by clock time** — at your chosen speed and at 1.5×
+- **channel mix** — the most frequent channels with their share of the playlist
+- **Deep scan (API)** — reads every video through InnerTube, including rows YouTube has not
+  rendered yet
 
 ## Where it runs
 
-playlist pages and the watch-page playlist panel
-
-## Install
-
-Read the [install guide](https://github.com/chirag127/userscript-install-guide), then:
-
-```
-https://github.com/chirag127/yt-playlist-stats-userscript/raw/main/yt-playlist-stats.user.js
-```
-
-Requires [`yt-core-lib`](https://github.com/chirag127/yt-core-lib), pulled in with `@require`.
-You do not install the core yourself.
+- `youtube.com/playlist?list=…`
+- the playlist panel on a watch page
 
 ## Settings
 
-Exactly one context-menu entry, called **Settings…**. It opens the shared in-page popup with:
+One entry — **Settings…** — opens the shared settings popup.
 
-- this script's own settings
-- the shared AI section (the key is entered once and used by every script)
-- buttons that run this script's actions
+| Field | Default | Purpose |
+|---|---|---|
+| Channels in the mix | 6 | how many channels to list (1–20) |
+| Finish-by clock uses speed | 1 | `1`, `1.25`, `1.5`, `2` |
+| Run the API deep scan when the panel opens | off | convenience for long playlists; slower and needs sign-in |
 
-## What it does NOT do
+## Deep scan
 
-- It never modifies your playlist.
-- It never writes to your account.
+Uses `Ytk.enumeratePlaylist` from the core: a same-origin `browse` request with SAPISIDHASH auth
+and continuation paging. Two things it does not hide:
 
-## License
+- It needs the signed-in account that can read the playlist.
+- It **collapses repeated video IDs to one entry**, so the count is the number of *unique*
+  videos, not rows. Duplicate rows are `yt-playlist-prune-userscript`'s job.
 
-MIT
+Rows with no duration (private, deleted, still loading) are counted separately; the total is a
+floor, not a ceiling.
+
+## Install
+
+Follow the [install guide](https://github.com/chirag127/userscript-install-guide). The script
+`@require`s [yt-core-lib](https://github.com/chirag127/yt-core-lib), which is never installed
+on its own.
+
+## Docs
+
+Collection documentation is single-sourced in the workspace bundle: `c:\ws\docs\okf\`.

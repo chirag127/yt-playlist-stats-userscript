@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Playlist Stats
 // @namespace    https://github.com/chirag127
-// @version      1.0.0
+// @version      1.0.1
 // @description  Playlist duration totals, watch time at 1.25x/1.5x/2x, a finish-by clock time, channel mix, and an optional API deep scan.
 // @author       chirag127
 // @license      MIT
@@ -13,6 +13,8 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @noframes
 // @run-at       document-idle
 // ==/UserScript==
