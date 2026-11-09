@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         YT Playlist Stats
 // @namespace    https://github.com/chirag127
-// @version      1.0.1
+// @version      1.0.2
 // @description  Playlist duration totals, watch time at 1.25x/1.5x/2x, a finish-by clock time, channel mix, and an optional API deep scan.
 // @author       chirag127
 // @license      MIT
 // @match        https://www.youtube.com/*
-// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.3.0.js
+// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.4.0.js
 // @downloadURL  https://raw.githubusercontent.com/chirag127/yt-playlist-stats-userscript/main/yt-playlist-stats.user.js
 // @updateURL    https://raw.githubusercontent.com/chirag127/yt-playlist-stats-userscript/main/yt-playlist-stats.user.js
 // @grant        GM_getValue
@@ -158,9 +158,10 @@
           btn.textContent = 'Deep scan (API)';
           btn.disabled = false;
         }).catch(function (err) {
+          const message = String((err && err.message) || err);
           out.textContent = '';
-          Ytk.note(out, 'Deep scan failed: ' + err.message, 'ytk2-err');
-          if (/SAPISID|signed in/i.test(err.message)) Ytk.note(out, 'The API read needs the account that owns the playlist. The loaded-rows stats above still work.');
+          Ytk.note(out, 'Deep scan failed: ' + message, 'ytk2-err');
+          if (/SAPISID|signed in/i.test(message)) Ytk.note(out, 'The API read needs the account that owns the playlist. The loaded-rows stats above still work.');
           btn.textContent = 'Deep scan (API)';
           btn.disabled = false;
         });
@@ -188,7 +189,7 @@
       subtitle: 'Durations, speed-adjusted watch time, finish clock and channel mix.',
       sectionTitle: 'Display',
       fields: fields,
-      // Core 1.2.0 keeps only its own settings keys on save; re-merge this script's keys.
+      // Core 1.3.0 keeps only its own settings keys on save; re-merge this script's keys.
       onSave: function (next) { Ytk.storeSet('settings', Object.assign({}, before, next)); }
     });
   });
@@ -200,5 +201,8 @@
     Ytk.mountToolbar([{ label: 'Stats', run: stats }]);
   }
   mount();
-  if (!mounted) document.addEventListener('yt-navigate-finish', mount);
+  // The sidebar panel often renders after document-idle, and an in-app navigation
+  // never reloads the page, so both events retry the idempotent mount.
+  document.addEventListener('yt-navigate-finish', mount);
+  document.addEventListener('yt-page-data-updated', mount);
 })();

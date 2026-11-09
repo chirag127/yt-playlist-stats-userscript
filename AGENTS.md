@@ -14,7 +14,7 @@ One userscript, one job: report the duration and composition of a playlist. Read
 3. **Shared toolbar and shared panel only.** No custom bar or second panel.
 4. **Reads only.** No playlist writes, no reordering, no removal. This script never calls a
    write endpoint.
-5. **Core is required, pinned:** `@require …/yt-core-lib-1.2.0.js`. Duration parsing is
+5. **Core is required, pinned:** `@require …/yt-core-lib-1.3.0.js`. Duration parsing is
    `Ytk.parseDuration`; the API read is `Ytk.enumeratePlaylist`. Do not reimplement either.
 
 ## Why the code looks the way it does
@@ -29,7 +29,11 @@ One userscript, one job: report the duration and composition of a playlist. Read
   Duplicate counting belongs to `yt-playlist-prune-userscript`.
 - **A total can be a floor.** Rows with no duration are reported, not silently treated as
   zero-length.
-- **Settings survive because of `onSave`.** Core 1.2.0's `openSettings` rebuilds
+- **Core 1.3.0 is the floor.** Each script has its own sandbox, so 1.2.0 drew one toolbar
+  per script; 1.3.0 reuses the `.ytk2-bar` already in the DOM.
+- **The AI grants stay.** The settings popup renders the shared AI section, which calls
+  `GM_xmlhttpRequest`; without `@grant GM_xmlhttpRequest` + `@connect *` its test fails.
+- **Settings survive because of `onSave`.** Core 1.3.0's `openSettings` rebuilds
   `ytk.settings` from its own defaults and drops keys it does not know
   (`statsChannelTop`, `statsFinishSpeed`, `statsAutoDeepScan`). The `onSave` merge restores
   them.
