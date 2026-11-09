@@ -2,16 +2,13 @@
 // @name         YT Playlist Stats
 // @namespace    https://github.com/chirag127
 // @version      1.0.0
-// @description  Total and average duration of a playlist, watch time at 1.25x/1.5x/2x, a finish-by clock and the channel mix. Read-only.
+// @description  Playlist duration totals, watch time at 1.25x/1.5x/2x, a finish-by clock time, channel mix, and an optional API deep scan.
 // @author       chirag127
 // @license      MIT
 // @match        https://www.youtube.com/*
-// @icon         https://www.youtube.com/favicon.ico
-// @homepageURL  https://github.com/chirag127/yt-playlist-stats-userscript
-// @supportURL   https://github.com/chirag127/yt-playlist-stats-userscript/issues
-// @downloadURL  https://github.com/chirag127/yt-playlist-stats-userscript/raw/main/yt-playlist-stats.user.js
-// @updateURL    https://github.com/chirag127/yt-playlist-stats-userscript/raw/main/yt-playlist-stats.user.js
-// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.2.0.js
+// @require      https://raw.githubusercontent.com/chirag127/yt-core-lib/main/yt-core-lib-1.3.0.js
+// @downloadURL  https://raw.githubusercontent.com/chirag127/yt-playlist-stats-userscript/main/yt-playlist-stats.user.js
+// @updateURL    https://raw.githubusercontent.com/chirag127/yt-playlist-stats-userscript/main/yt-playlist-stats.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -23,133 +20,183 @@
 (function () {
   'use strict';
 
-  if (typeof Ytk === 'undefined') { console.error('[playlist-stats] core did not load'); return; }
+  if (typeof Ytk === 'undefined') { console.error('[yt-playlist-stats] core did not load'); return; }
   if (!Ytk.featureOn('stats', true)) return;
 
-  var ROW_SELECTORS = ['yt-lockup-view-model', 'ytd-playlist-video-renderer', 'ytd-playlist-panel-video-renderer'];
-  var DURATION_RE = /^\d{1,2}:\d{2}(?::\d{2})?$/;
+  const ROW_SEL = 'yt-lockup-view-model, ytd-playlist-video-renderer, ytd-playlist-panel-video-renderer';
+  const DURATION_RE = /^\d{1,2}:\d{2}(?::\d{2})?$/;
+  const BTN = 'font:inherit;font-size:12px;padding:6px 11px;border-radius:8px;cursor:pointer;'
+    + 'border:1px solid #3a3a3a;background:#262626;color:#eaeaea';
+
+  function onPlaylistSurface() {
+    return location.pathname === '/playlist' || !!document.querySelector('ytd-playlist-panel-renderer');
+  }
+
+  function raw() { return Ytk.storeGet('settings', {}) || {}; }
 
   function playlistId() {
-    var q = new URLSearchParams(location.search).get('list');
-    if (q) return q;
-    var panel = document.querySelector('ytd-playlist-panel-renderer[playlist-id]');
+    const fromUrl = new URLSearchParams(location.search).get('list');
+    if (fromUrl) return fromUrl;
+    const panel = document.querySelector('ytd-playlist-panel-renderer[playlist-id]');
     return panel ? panel.getAttribute('playlist-id') : null;
   }
 
-  function rows() {
-    for (var i = 0; i < ROW_SELECTORS.length; i++) {
-      var found = Array.prototype.slice.call(document.querySelectorAll(ROW_SELECTORS[i]));
-      if (found.length) return found;
-    }
-    return [];
+  function rowRoot() {
+    const root = location.pathname === '/playlist'
+      ? document.querySelector('ytd-playlist-video-list-renderer') || document.querySelector('ytd-browse[page-subtype="playlist"]')
+      : document.querySelector('ytd-playlist-panel-renderer');
+    return root || null;
   }
 
-  function readRow(node) {
-    var texts = [];
-    (function walk(o, d) {
-      if (!o || typeof o !== 'object' || d > 12) return;
-      if (Array.isArray(o)) { o.forEach(function (x) { walk(x, d + 1); }); return; }
-      for (var k in o) {
-        if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
-        var v = o[k];
-        if ((k === 'content' || k === 'text' || k === 'simpleText') && typeof v === 'string') texts.push(v);
-        else if (v && typeof v === 'object') walk(v, d + 1);
+  function rowInfo(node) {
+    const vm = node.data && node.data.lockupViewModel ? Ytk.lockupToItem(node.data.lockupViewModel) : null;
+    const titleEl = node.querySelector('yt-lockup-metadata-view-model h3 a, a#video-title, #video-title');
+    const chanEl = node.querySelector('ytd-channel-name a, #channel-name a, a[href^="/@"], a[href^="/channel/"]');
+    const durEl = node.querySelector('#time-status #text, ytd-thumbnail-overlay-time-status-renderer #text');
+    let duration = (vm && vm.duration) || (durEl && durEl.textContent) || '';
+    if (!duration) {
+      const anchors = node.querySelectorAll('a');
+      for (let i = 0; i < anchors.length; i++) {
+        const text = (anchors[i].textContent || '').trim();
+        if (DURATION_RE.test(text)) { duration = text; break; }
       }
-    })(node, 0);
-
-    var duration = '';
-    for (var i = 0; i < texts.length; i++) if (DURATION_RE.test(texts[i])) { duration = texts[i]; break; }
-    var chanA = node.querySelector('a[href^="/channel/"], a[href^="/@"]');
-    var channel = chanA ? (chanA.textContent || '').trim() : '';
-    return { duration: duration, channel: channel };
-  }
-
-  function fmtClock(d) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-
-  function show() {
-    var all = rows();
-    var total = 0;
-    var timed = 0;
-    var channels = {};
-    for (var i = 0; i < all.length; i++) {
-      var r = readRow(all[i]);
-      var sec = Ytk.parseDuration(r.duration);
-      if (sec) { total += sec; timed += 1; }
-      if (r.channel) channels[r.channel] = (channels[r.channel] || 0) + 1;
     }
-    var mix = Object.keys(channels).sort(function (a, b) { return channels[b] - channels[a]; }).slice(0, 6);
+    return {
+      title: String((vm && vm.title) || (titleEl && (titleEl.getAttribute('title') || titleEl.textContent)) || '').trim(),
+      channel: String((vm && vm.channel) || (chanEl && chanEl.textContent) || '').trim(),
+      duration: String(duration).trim()
+    };
+  }
 
-    Ytk.panel('Playlist stats', function (body) {
-      Ytk.kv(body, 'Rows on screen', all.length);
-      Ytk.kv(body, 'With a readable duration', timed);
-      Ytk.kv(body, 'Total duration', Ytk.fmtDuration ? Ytk.fmtDuration(total) : Math.round(total / 60) + ' min');
-      Ytk.kv(body, 'Average', timed ? Math.round(total / timed / 60) + ' min' : '—');
-      body.appendChild(Ytk.h('div', { style: 'height:8px' }));
-      Ytk.kv(body, 'Watch @1.25×', Math.round(total / 1.25 / 60) + ' min');
-      Ytk.kv(body, 'Watch @1.5×', Math.round(total / 1.5 / 60) + ' min');
-      Ytk.kv(body, 'Watch @2×', Math.round(total / 2 / 60) + ' min');
-      body.appendChild(Ytk.h('div', { style: 'height:8px' }));
-      Ytk.kv(body, 'Finish @1× by', fmtClock(new Date(Date.now() + total * 1000)));
-      Ytk.kv(body, 'Finish @1.5× by', fmtClock(new Date(Date.now() + (total / 1.5) * 1000)));
+  function readRows() {
+    const root = rowRoot();
+    return root ? Array.from(root.querySelectorAll(ROW_SEL)).map(rowInfo) : [];
+  }
+
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return h
+      ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+      : m + ':' + String(s).padStart(2, '0');
+  }
+
+  function fmtClock(sec) {
+    return new Date(Date.now() + sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function summarize(rows) {
+    const timed = rows.filter(function (r) { return Ytk.parseDuration(r.duration) > 0; });
+    const total = timed.reduce(function (sum, r) { return sum + Ytk.parseDuration(r.duration); }, 0);
+    const channels = {};
+    rows.forEach(function (r) { if (r.channel) channels[r.channel] = (channels[r.channel] || 0) + 1; });
+    return { rows: rows, timed: timed.length, total: total, channels: channels };
+  }
+
+  function stats() {
+    if (!onPlaylistSurface()) { Ytk.toast('Open a playlist first.'); return; }
+    const rows = readRows();
+    const sum = summarize(rows);
+    const topN = Math.max(1, Math.min(20, parseInt(raw().statsChannelTop, 10) || 6));
+    const primary = Number(raw().statsFinishSpeed) || 1;
+    const mix = Object.keys(sum.channels).sort(function (a, b) { return sum.channels[b] - sum.channels[a]; }).slice(0, topN);
+
+    const panel = Ytk.panel('Playlist stats', function (body) {
+      Ytk.kv(body, 'Rows loaded', rows.length);
+      Ytk.kv(body, 'Rows with a duration', sum.timed);
+      Ytk.kv(body, 'Total duration', fmtDuration(sum.total));
+      Ytk.kv(body, 'Average per video', fmtDuration(sum.timed ? sum.total / sum.timed : 0));
+      Ytk.note(body, 'Watch time at speed');
+      [1.25, 1.5, 2].forEach(function (speed) { Ytk.kv(body, 'At ' + speed + '×', fmtDuration(sum.total / speed)); });
+      Ytk.note(body, 'Finish by (wall clock, starting now)');
+      Ytk.kv(body, 'At ' + primary + '×', sum.total ? fmtClock(sum.total / primary) : '—');
+      Ytk.kv(body, 'At 1.5×', sum.total ? fmtClock(sum.total / 1.5) : '—');
 
       if (mix.length) {
-        body.appendChild(Ytk.h('div', { style: 'height:10px' }));
-        Ytk.note(body, 'Channel mix');
-        mix.forEach(function (c) { Ytk.kv(body, c, channels[c]); });
+        body.appendChild(Ytk.h('div', { style: 'height:8px' }));
+        Ytk.note(body, 'Channel mix — most frequent first');
+        mix.forEach(function (name) {
+          const pct = Math.round((sum.channels[name] / rows.length) * 100);
+          Ytk.kv(body, name + ' · ' + pct + '%', sum.channels[name]);
+        });
       }
 
-      if (timed < all.length) {
-        Ytk.note(body, (all.length - timed) + ' row(s) had no readable duration. Use Deep scan for an exact total.', 'ytk2-warn');
+      if (rows.length && sum.timed < rows.length) {
+        Ytk.note(body, (rows.length - sum.timed) + ' row(s) had no readable duration — usually still loading or unavailable. Deep scan counts those separately.', 'ytk2-warn');
+      }
+      Ytk.note(body, 'Loaded rows only. Scroll the playlist to load more, or run a deep scan for every video.');
+
+      const btn = Ytk.h('button', { text: 'Deep scan (API)', style: BTN });
+      const out = Ytk.h('div', { style: 'padding-top:8px' });
+      body.appendChild(Ytk.h('div', { style: 'padding-top:10px' }, btn));
+      body.appendChild(out);
+
+      function scan() {
+        const listId = playlistId();
+        if (!listId) { out.textContent = 'No playlist id in the URL.'; return; }
+        btn.disabled = true;
+        let lastPaint = 0;
+        Ytk.enumeratePlaylist(listId, function (count) {
+          if (count - lastPaint < 25) return;
+          lastPaint = count;
+          btn.textContent = 'Scanning… ' + count;
+        }).then(function (items) {
+          const apiSum = summarize(items);
+          const noDuration = items.length - apiSum.timed;
+          out.textContent = '';
+          Ytk.kv(out, 'Videos enumerated', items.length);
+          Ytk.kv(out, 'Total duration', fmtDuration(apiSum.total));
+          Ytk.kv(out, 'Average per video', fmtDuration(apiSum.timed ? apiSum.total / apiSum.timed : 0));
+          Ytk.kv(out, 'Finish at ' + primary + '× by', apiSum.total ? fmtClock(apiSum.total / primary) : '—');
+          if (noDuration) Ytk.note(out, noDuration + ' video(s) reported no duration, so the total is a floor, not a ceiling.', 'ytk2-warn');
+          // enumeratePlaylist drops repeated video ids, so duplicates are not visible here.
+          Ytk.note(out, 'Exact list via InnerTube. Repeated video IDs are collapsed to one, so a playlist with duplicates reports its unique video count.');
+          btn.textContent = 'Deep scan (API)';
+          btn.disabled = false;
+        }).catch(function (err) {
+          out.textContent = '';
+          Ytk.note(out, 'Deep scan failed: ' + err.message, 'ytk2-err');
+          if (/SAPISID|signed in/i.test(err.message)) Ytk.note(out, 'The API read needs the account that owns the playlist. The loaded-rows stats above still work.');
+          btn.textContent = 'Deep scan (API)';
+          btn.disabled = false;
+        });
       }
 
-      body.appendChild(Ytk.h('div', { style: 'padding-top:10px' },
-        Ytk.h('button', {
-          class: 'yts-btn',
-          text: 'Deep scan (API)',
-          onclick: function (e) {
-            var btn = e.currentTarget;
-            var id = playlistId();
-            if (!id) { Ytk.toast('Open a playlist page first'); return; }
-            btn.disabled = true;
-            btn.textContent = 'Scanning…';
-            Ytk.enumeratePlaylist(id, function (n) { btn.textContent = n + ' videos…'; })
-              .then(function (items) {
-                var sec2 = items.reduce(function (a, v) { return a + Ytk.parseDuration(v.duration); }, 0);
-                Ytk.kv(body, 'Full playlist', items.length + ' videos · ' + Math.round(sec2 / 3600) + 'h ' + Math.round((sec2 % 3600) / 60) + 'm');
-                btn.textContent = 'Deep scan (API)';
-                btn.disabled = false;
-              })
-              .catch(function (err) {
-                btn.textContent = 'Scan failed: ' + err.message;
-              });
-          }
-        })
-      ));
+      btn.addEventListener('click', scan);
+      if (raw().statsAutoDeepScan) scan();
     });
+    return panel;
   }
 
-  function settingsPopup() {
-    if (typeof Ytk.openSettings !== 'function') {
-      alert('The shared core is out of date (v' + Ytk.VERSION + '). Reinstall this script.');
-      return;
-    }
+  const fields = [
+    { key: 'statsChannelTop', label: 'Channels in the mix', type: 'number', def: parseInt(raw().statsChannelTop, 10) || 6, hint: '1–20, most frequent first.' },
+    {
+      key: 'statsFinishSpeed', label: 'Finish-by clock uses speed', type: 'select',
+      options: ['1', '1.25', '1.5', '2'], def: String(raw().statsFinishSpeed || '1')
+    },
+    { key: 'statsAutoDeepScan', label: 'Run the API deep scan when the panel opens', type: 'checkbox', def: !!raw().statsAutoDeepScan, hint: 'Slower: reads every video through InnerTube. Needs you to be signed in.' }
+  ];
+
+  GM_registerMenuCommand('Settings…', function () {
+    const before = raw();
     Ytk.openSettings({
       title: 'YT Playlist Stats',
-      subtitle: 'Durations come from the rows currently rendered. Deep scan asks the API for every video.',
-      sectionTitle: 'Stats',
-      fields: [
-        { key: 'statsShowChannels', label: 'Show the channel mix', type: 'checkbox', def: true },
-        { key: 'statsSpeeds', label: 'Speeds to calculate, comma separated', type: 'text', def: '1.25,1.5,2' },
-        { key: 'statsAutoScan', label: 'Run a deep API scan as soon as the panel opens', type: 'checkbox', def: false }
-      ],
-      actions: [{ label: 'Show stats now', run: show }]
+      subtitle: 'Durations, speed-adjusted watch time, finish clock and channel mix.',
+      sectionTitle: 'Display',
+      fields: fields,
+      // Core 1.2.0 keeps only its own settings keys on save; re-merge this script's keys.
+      onSave: function (next) { Ytk.storeSet('settings', Object.assign({}, before, next)); }
     });
+  });
+
+  let mounted = false;
+  function mount() {
+    if (mounted || !onPlaylistSurface()) return;
+    mounted = true;
+    Ytk.mountToolbar([{ label: 'Stats', run: stats }]);
   }
-
-  if (!playlistId() && !rows().length) return;
-
-  Ytk.mountToolbar([{ label: 'Stats', run: show }]);
-  if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('Settings…', settingsPopup);
+  mount();
+  if (!mounted) document.addEventListener('yt-navigate-finish', mount);
 })();
